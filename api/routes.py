@@ -1,10 +1,12 @@
 import uuid
+import asyncio
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import StreamingResponse
 from agent.graph import support_graph
 from agent.state import SupportAgentState
 from api.schemas import StartSessionResponse, AgentResponse
 from services.sarvam import transcribe
+from services.ser import classify_emotion
 from services import tts
 from services import session_store
 
@@ -139,7 +141,7 @@ async def conversation_voice(
     language_code: str = Form(...),
     audio: UploadFile = File(...),
 ):
-    """Voice turn: transcribe audio then send to conversation agent."""
+    """Voice turn: run STT and SER in parallel, then send to conversation agent."""
     agent = session_store.get(session_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Session not found or expired")
@@ -147,9 +149,16 @@ async def conversation_voice(
         raise HTTPException(status_code=400, detail="Conversation already resolved")
 
     audio_bytes = await audio.read()
-    transcript  = await transcribe(audio_bytes, language_code)
-    result      = await agent.send_message(transcript)
-    result["transcript"] = transcript
+
+    # STT and SER fire simultaneously — total latency = slower of the two
+    transcript, audio_emotion = await asyncio.gather(
+        transcribe(audio_bytes, language_code),
+        classify_emotion(audio_bytes),
+    )
+
+    result = await agent.send_message(transcript, audio_emotion=audio_emotion)
+    result["transcript"]    = transcript
+    result["voice_emotion"] = audio_emotion
     return result
 
 

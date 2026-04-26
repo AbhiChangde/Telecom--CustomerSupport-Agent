@@ -9,3 +9,6 @@ pydantic>=2.0
 pinecone-client>=3.0
 python-dotenv>=1.0
 sarvamai
+# SER — Speech Emotion Recognition
+transformers>=4.40
+av>=12.0

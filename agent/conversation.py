@@ -153,12 +153,12 @@ class ConversationAgent:
         self.messages.append({"role": "agent", "text": greeting})
         return greeting
 
-    async def send_message(self, user_text: str) -> dict:
+    async def send_message(self, user_text: str, audio_emotion: dict | None = None) -> dict:
         """Process one user turn. Returns {text, is_resolved, branch, ticket_id, handoff_brief, decision}."""
         self.messages.append({"role": "user", "text": user_text})
 
-        # Detect frustration every turn and tag the message for Gemini
-        frustration_level = self._detect_frustration(user_text)
+        # Combine text-keyword detection with SER (voice) emotion — take the higher of the two
+        frustration_level = self._detect_frustration(user_text, audio_emotion)
         tagged_input = f"[Frustration: {frustration_level}] {user_text}"
 
         resp   = await self.chat.send_message_async(tagged_input)
@@ -193,20 +193,38 @@ class ConversationAgent:
 
     # ── Internal helpers ─────────────────────────────────────────────────────
 
-    def _detect_frustration(self, text: str) -> str:
-        """Keyword scan + consecutive counter. Returns low/medium/high/critical."""
+    _FRUSTRATION_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+
+    def _detect_frustration(self, text: str, audio_emotion: dict | None = None) -> str:
+        """
+        Both text-keyword and SER work independently — either one can flag frustration.
+        The higher of the two signals wins.
+
+        - Text: triggers on explicit frustration words (useless, worst, fraud, port…)
+        - SER:  triggers on vocal tone (anger, disgust, fear) — only when confidence
+                clears the per-level gate in ser.py, so weak detections stay "low"
+        """
+        order      = self._FRUSTRATION_ORDER
+        text_level = self._text_frustration(text)
+        ser_level  = (audio_emotion or {}).get("frustration_level", "low")
+        effective  = text_level if order.get(text_level, 0) >= order.get(ser_level, 0) else ser_level
+
+        if order.get(effective, 0) >= 2:      # high or critical
+            self.consecutive_frustrated += 1
+        elif order.get(effective, 0) == 0:    # low
+            self.consecutive_frustrated = max(0, self.consecutive_frustrated - 1)
+
+        return effective
+
+    def _text_frustration(self, text: str) -> str:
+        """Keyword-only scan on transcript text."""
         t = text.lower()
         if any(w in t for w in _CRITICAL_FRUSTRATION):
-            self.consecutive_frustrated += 2
             return "critical"
         if any(w in t for w in _HIGH_FRUSTRATION):
-            self.consecutive_frustrated += 1
             return "high"
-        # Mild: more than one sentence question mark or "please" indicates polite but impatient
         if t.count("?") >= 2 or "please" in t:
-            self.consecutive_frustrated = max(self.consecutive_frustrated, 1)
             return "medium"
-        self.consecutive_frustrated = max(0, self.consecutive_frustrated - 1)
         return "low"
 
     def _extract_spoken(self, raw: str) -> str:
