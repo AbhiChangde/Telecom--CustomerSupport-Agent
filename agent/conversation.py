@@ -98,6 +98,7 @@ RESOLVE rules:
 """
 
 RESOLVE_RE = re.compile(r'RESOLVE:(\{[^}]+\})', re.DOTALL)
+_FRUSTRATION_TAG_RE = re.compile(r'\[Frustration:\s*\w+\]\s*', re.IGNORECASE)
 
 
 class ConversationAgent:
@@ -228,7 +229,9 @@ class ConversationAgent:
         return "low"
 
     def _extract_spoken(self, raw: str) -> str:
-        return RESOLVE_RE.sub("", raw).strip()
+        text = RESOLVE_RE.sub("", raw)
+        text = _FRUSTRATION_TAG_RE.sub("", text)
+        return text.strip()
 
     async def _quick_reply(self, prompt: str, fallback: str) -> str:
         """Short Gemini call with tight token limit and a fallback on any error."""

@@ -37,8 +37,17 @@ The human agent receives a structured **handoff brief** — customer profile, AR
 ### Conversational, multi-turn flow
 Unlike a single-shot intent classifier, Aria holds a real multi-turn conversation via a persistent Gemini chat session. She greets, empathises, clarifies if needed, resolves, follows up ("Is there anything else I can help with?"), and only closes when the customer is satisfied or escalation is triggered.
 
-### Per-turn frustration detection
-Every customer message is scanned for frustration signals (keyword match + consecutive frustrated turn counter) before being sent to Gemini. The message is tagged `[Frustration: low/medium/high/critical]` so the LLM adapts its tone and routing decision on every turn, not just at the end.
+### Per-turn frustration detection (dual-signal)
+Every customer message is evaluated by two independent signals before it reaches Gemini:
+
+| Signal | Source | How it works |
+|---|---|---|
+| **Text keywords** | Transcript or typed text | Scans for frustration words (`useless`, `fraud`, `port`, churn signals, etc.) — also works in Hindi (`बेकार`, `घटिया`) |
+| **Voice emotion (SER)** | Raw audio only | `superb/wav2vec2-base-superb-er` classifies the audio into emotion categories (angry, sad, fearful, etc.) and maps them to frustration levels |
+
+The higher of the two signals wins. A calm sentence spoken in an angry tone, or an aggressive sentence spoken quietly, will each be caught by the appropriate signal.
+
+Each message is tagged `[Frustration: low/medium/high/critical]` before being sent to Gemini, so the LLM adapts its tone and routing decision on every single turn — not just at resolution time. A consecutive frustrated turn counter also tracks sustained agitation across turns.
 
 ### ARPU-tier-aware routing
 Escalation thresholds differ by customer value:
@@ -49,6 +58,22 @@ Escalation thresholds differ by customer value:
 | `postpaid_std` / `prepaid_*` | High or critical frustration only |
 
 Lower-tier customers who are only mildly frustrated receive warm ticket assurance instead of being escalated. Even if Gemini recommends escalation for a low-ARPU customer with medium frustration, the backend overrides it to raise a ticket.
+
+### Speech Emotion Recognition (SER)
+On every voice turn, the raw audio is processed in parallel with STT — it never waits for transcription to finish. The model used is `superb/wav2vec2-base-superb-er`, a wav2vec2 model fine-tuned on the IEMOCAP emotion corpus. It classifies audio into eight emotion categories which are mapped to frustration levels:
+
+| Emotion label | Frustration level |
+|---|---|
+| `ang` (angry) | critical |
+| `dis` (disgust), `fea` (fearful) | high |
+| `sad` | medium |
+| `neu`, `hap`, `cal`, `sur` | low |
+
+A **confidence gate** filters out weak detections: critical requires ≥ 65% confidence, high requires ≥ 55%, medium requires ≥ 50%. Anything below the gate falls back to `low`. This prevents mislabelling neutral speech that happens to score a low-confidence `ang`.
+
+The model is lazy-loaded on first voice call (≈ 360 MB download, cached afterwards). Set `USE_MOCK_SER=true` in `.env` to skip the model entirely.
+
+SER runs on CPU with no GPU required. Every voice turn prints a terminal log showing all four top emotion scores and the final frustration decision.
 
 ### Indian language support
 Speech-to-text uses Sarvam **saaras:v3**, purpose-built for Indian languages and Hinglish code-switching. Text-to-speech uses Sarvam **bulbul:v2**. Supported languages: Hindi, English, Tamil, Telugu, Marathi, Bengali.
@@ -79,8 +104,16 @@ On escalation, the human agent receives:
 │  Gemini 2.5 Flash  ◄──── system prompt (Aria persona,      │
 │  multi-turn chat         ARPU tier rules, tone detection)  │
 │       │                                                     │
-│  Each user turn:                                            │
-│  1. _detect_frustration() → tags message [Frustration: X]  │
+│  Each voice turn:                                           │
+│  STT (Sarvam) ──── parallel ────  SER (wav2vec2)           │
+│       │                                │                    │
+│  transcript                    frustration level            │
+│       │                                │                    │
+│       └──────────── combined ──────────┘                    │
+│  Each turn (text or voice):                                 │
+│  1. _detect_frustration(text, audio_emotion)                │
+│     → higher of keyword scan + SER signal wins             │
+│     → tags message [Frustration: X]                        │
 │  2. send_message_async() → Gemini responds                  │
 │  3. RESOLVE:{...} detected? → _close()                     │
 │       │                                                     │
@@ -118,6 +151,7 @@ TelecomAgent/
 │   ├── crm.py                     # CRM mock (reads data/mock/customers.json)
 │   ├── sarvam.py                  # Sarvam STT (saaras:v3)
 │   ├── tts.py                     # Sarvam TTS (bulbul:v2)
+│   ├── ser.py                     # Speech Emotion Recognition (wav2vec2-base-superb-er)
 │   ├── vector_db.py               # Pinecone / mock vector memory
 │   ├── sms.py                     # SMS mock
 │   └── session_store.py           # In-memory session registry
@@ -166,7 +200,11 @@ pydantic >= 2.0
 pinecone-client >= 3.0
 python-dotenv >= 1.0
 sarvamai
+transformers >= 4.40   # SER model
+av >= 12.0             # WebM/Opus audio decoding (no system FFmpeg needed)
 ```
+
+> **Note on SER model size:** `transformers` downloads `superb/wav2vec2-base-superb-er` (~360 MB) on first voice call. It is cached afterwards by HuggingFace. If you want to skip this entirely, set `USE_MOCK_SER=true` — no `transformers` or `torch` installation needed in that case.
 
 ---
 
@@ -222,17 +260,26 @@ USE_MOCK_CRM=true
 USE_MOCK_STT=false
 USE_MOCK_VECTOR_DB=true
 USE_MOCK_SMS=true
+USE_MOCK_SER=false     # set true to skip SER model (no torch needed)
 ```
 
-> To run the demo without any API keys at all, set `USE_MOCK_STT=true` in addition to the others.
+> To run the demo without any API keys at all, set `USE_MOCK_STT=true` in addition to the others. Set `USE_MOCK_SER=true` if you want to skip the 360 MB model download.
 
-### 4. Run the server
+### 4. (Optional) Verify SER is working
+
+```bash
+python tests/test_ser.py
+```
+
+This downloads the wav2vec2 model on first run (~360 MB), runs a synthetic audio signal through the full pipeline, and prints the emotion scores. Skip this step if you set `USE_MOCK_SER=true`.
+
+### 5. Run the server
 
 ```bash
 uvicorn main:app --reload
 ```
 
-### 5. Open the demo UI
+### 6. Open the demo UI
 
 Visit [http://localhost:8000](http://localhost:8000) in your browser.
 
