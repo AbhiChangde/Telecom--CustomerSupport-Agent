@@ -1,7 +1,7 @@
 from typing import Literal
 from pydantic import BaseModel
 
-
+#This class is for customer information
 class CustomerProfile(BaseModel):
     customer_id: str
     name: str
