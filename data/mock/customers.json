@@ -1,0 +1,46 @@
+{
+  "CUST001": {
+    "customer_id": "CUST001",
+    "name": "Rahul Verma",
+    "mobile": "+919876543210",
+    "arpu_monthly": 1499.0,
+    "arpu_tier": "black",
+    "tenure_years": 5.2,
+    "plan_type": "postpaid",
+    "plan_name": "Airtel Black 1499",
+    "location": "Hyderabad"
+  },
+  "CUST002": {
+    "customer_id": "CUST002",
+    "name": "Priya Sharma",
+    "mobile": "+917788812345",
+    "arpu_monthly": 299.0,
+    "arpu_tier": "prepaid_monthly",
+    "tenure_years": 0.4,
+    "plan_type": "prepaid",
+    "plan_name": "Prepaid 299",
+    "location": "Mumbai"
+  },
+  "CUST003": {
+    "customer_id": "CUST003",
+    "name": "Suresh Iyer",
+    "mobile": "+919012345678",
+    "arpu_monthly": 999.0,
+    "arpu_tier": "postpaid_high",
+    "tenure_years": 11.0,
+    "plan_type": "postpaid",
+    "plan_name": "Postpaid 999",
+    "location": "Chennai"
+  },
+  "CUST004": {
+    "customer_id": "CUST004",
+    "name": "Deepak Nair",
+    "mobile": "+918823456789",
+    "arpu_monthly": 549.0,
+    "arpu_tier": "postpaid_std",
+    "tenure_years": 3.1,
+    "plan_type": "postpaid",
+    "plan_name": "Postpaid 549",
+    "location": "Bangalore"
+  }
+}

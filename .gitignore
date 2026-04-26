@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.egg
+*.egg-info/
+dist/
+build/
+wheels/
+*.whl
+*.spec
+
+# Virtual environment
+venv/
+.venv/
+env/
+.env/
+ENV/
+
+# Environment variables — NEVER commit secrets
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# LangSmith / LangChain local traces
+.langchain/
+langchain.db
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# MyPy / type cache
+.mypy_cache/
+.dmypy.json
+
+# Pinecone / vector DB local state
+pinecone_local/
+
+# Distribution / packaging
+MANIFEST
+*.tar.gz
+
+# Data — keep mock JSON but ignore large or sensitive datasets
+data/airtel_support_cluster_reviews.xlsx
+data/*.xlsx
+data/*.csv

@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>TeleSupport AI — Voice Agent</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f0f2f5;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ── Shell ── */
+    .shell {
+      width: 420px;
+      max-width: 98vw;
+      height: 92vh;
+      max-height: 820px;
+      background: #fff;
+      border-radius: 20px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.13);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Header ── */
+    .header {
+      background: linear-gradient(135deg, #e40000, #b30000);
+      color: #fff;
+      padding: 16px 20px 14px;
+      flex-shrink: 0;
+    }
+    .header-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .header-top h1 { font-size: 1.1rem; font-weight: 700; }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #4caf50;
+      display: inline-block;
+      margin-right: 5px;
+    }
+    .status-dot.idle { background: #aaa; }
+    .status-text { font-size: 0.72rem; opacity: 0.9; }
+
+    .header-selectors { display: flex; gap: 8px; }
+    .header-selectors select {
+      flex: 1;
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: none;
+      font-size: 0.8rem;
+      background: rgba(255,255,255,0.18);
+      color: #fff;
+      outline: none;
+      cursor: pointer;
+    }
+    .header-selectors select option { background: #b30000; color: #fff; }
+
+    #start-btn {
+      width: 100%;
+      margin-top: 10px;
+      padding: 8px;
+      background: rgba(255,255,255,0.22);
+      border: 1.5px solid rgba(255,255,255,0.5);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #start-btn:hover { background: rgba(255,255,255,0.32); }
+    #start-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Chat area ── */
+    .chat-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      scroll-behavior: smooth;
+    }
+    .chat-area::-webkit-scrollbar { width: 4px; }
+    .chat-area::-webkit-scrollbar-thumb { background: #ddd; border-radius: 4px; }
+
+    .bubble-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+    }
+    .bubble-row.agent { justify-content: flex-start; }
+    .bubble-row.user  { justify-content: flex-end; }
+
+    .avatar {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: #e40000;
+      color: #fff;
+      font-size: 0.7rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .bubble {
+      max-width: 78%;
+      padding: 10px 14px;
+      border-radius: 16px;
+      font-size: 0.88rem;
+      line-height: 1.5;
+      position: relative;
+    }
+    .bubble.agent {
+      background: #f2f2f2;
+      color: #1a1a1a;
+      border-bottom-left-radius: 4px;
+    }
+    .bubble.user {
+      background: #e40000;
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .bubble .ts {
+      font-size: 0.65rem;
+      opacity: 0.55;
+      margin-top: 4px;
+      display: block;
+    }
+    .bubble.agent .ts { text-align: left; }
+    .bubble.user  .ts { text-align: right; }
+
+    /* Speaking indicator */
+    .typing {
+      display: flex;
+      gap: 4px;
+      padding: 10px 14px;
+      background: #f2f2f2;
+      border-radius: 16px;
+      border-bottom-left-radius: 4px;
+      width: fit-content;
+    }
+    .typing span {
+      width: 6px; height: 6px;
+      background: #aaa;
+      border-radius: 50%;
+      animation: bounce 1s infinite;
+    }
+    .typing span:nth-child(2) { animation-delay: 0.15s; }
+    .typing span:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); }
+      40%           { transform: translateY(-6px); }
+    }
+
+    /* Resolution card */
+    .resolution-card {
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin: 4px 0;
+      font-size: 0.83rem;
+    }
+    .resolution-card.raise   { background: #e8f5e9; border: 1.5px solid #a5d6a7; }
+    .resolution-card.exists  { background: #e3f2fd; border: 1.5px solid #90caf9; }
+    .resolution-card.escalate{ background: #fce4ec; border: 1.5px solid #f48fb1; }
+    .resolution-card .rc-title {
+      font-weight: 700;
+      font-size: 0.82rem;
+      margin-bottom: 8px;
+    }
+    .resolution-card.raise   .rc-title { color: #2e7d32; }
+    .resolution-card.exists  .rc-title { color: #1565c0; }
+    .resolution-card.escalate .rc-title { color: #c62828; }
+    .rc-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+    .rc-key { color: #888; font-size: 0.75rem; }
+    .rc-val { font-weight: 600; font-size: 0.8rem; color: #222; }
+    .churn-badge {
+      background: #c62828; color: #fff;
+      font-size: 0.7rem; font-weight: 700;
+      padding: 2px 8px; border-radius: 10px;
+      display: inline-block; margin-bottom: 6px;
+    }
+    .first-move {
+      background: rgba(0,0,0,0.05);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 0.75rem;
+      color: #444;
+      margin-top: 6px;
+      font-style: italic;
+    }
+
+    /* ── Input bar ── */
+    .input-bar {
+      border-top: 1px solid #eee;
+      padding: 12px 14px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-shrink: 0;
+      background: #fff;
+    }
+    .input-bar input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1.5px solid #ddd;
+      border-radius: 24px;
+      font-size: 0.88rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .input-bar input:focus { border-color: #e40000; }
+    .input-bar input:disabled { background: #f9f9f9; }
+
+    #send-btn {
+      width: 38px; height: 38px;
+      border-radius: 50%;
+      background: #e40000;
+      border: none;
+      color: #fff;
+      font-size: 1rem;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.2s;
+    }
+    #send-btn:hover    { background: #b30000; }
+    #send-btn:disabled { background: #ccc; cursor: not-allowed; }
+
+    #mic-btn {
+      width: 38px; height: 38px;
+      border-radius: 50%;
+      background: #f5f5f5;
+      border: 1.5px solid #ddd;
+      font-size: 1.1rem;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    #mic-btn.recording {
+      background: #fce4ec;
+      border-color: #e40000;
+      animation: pulse 1.2s infinite;
+    }
+    #mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    @keyframes pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(228,0,0,0.4); }
+      70%  { box-shadow: 0 0 0 10px rgba(228,0,0,0); }
+      100% { box-shadow: 0 0 0 0 rgba(228,0,0,0); }
+    }
+
+    .tts-indicator {
+      font-size: 0.7rem;
+      color: #e40000;
+      text-align: center;
+      padding: 2px 0 4px;
+      display: none;
+    }
+    .tts-indicator.active { display: block; }
+
+    .empty-state {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #bbb;
+      gap: 8px;
+      font-size: 0.85rem;
+    }
+    .empty-state .icon { font-size: 2.5rem; }
+
+    /* ── Ticket status animation ── */
+    .ticket-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 14px;
+      background: #f8f9ff;
+      border: 1px solid #e0e7ff;
+      border-radius: 20px;
+      font-size: 0.76rem;
+      color: #555;
+      margin: 2px auto;
+      width: fit-content;
+      max-width: 86%;
+      animation: fadeSlideIn 0.25s ease;
+    }
+    .ticket-status.success { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+    .ticket-status.info    { background: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
+    .ticket-status.checking { background: #fafafa; border-color: #e5e7eb; color: #6b7280; }
+    @keyframes fadeSlideIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .ts-spin {
+      display: inline-block;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Frustration badge on user bubbles ── */
+    .frustration-badge {
+      font-size: 0.62rem;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 8px;
+      display: inline-block;
+      margin-bottom: 3px;
+      letter-spacing: 0.02em;
+    }
+    .fb-low      { background: #dcfce7; color: #166534; }
+    .fb-medium   { background: #fef9c3; color: #854d0e; }
+    .fb-high     { background: #fed7aa; color: #9a3412; }
+    .fb-critical { background: #fee2e2; color: #991b1b; }
+  </style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-top">
+      <h1>TeleSupport AI</h1>
+      <span>
+        <span class="status-dot idle" id="status-dot"></span>
+        <span class="status-text" id="status-text">Ready</span>
+      </span>
+    </div>
+    <div class="header-selectors">
+      <select id="customer-id">
+        <option value="CUST001">Rahul Verma — Black ₹1499</option>
+        <option value="CUST002">Priya Sharma — Prepaid ₹299</option>
+        <option value="CUST003">Suresh Iyer — Postpaid ₹999</option>
+        <option value="CUST004">Deepak Nair — Postpaid ₹549</option>
+      </select>
+      <select id="language-code">
+        <option value="en">English</option>
+        <option value="hi">Hindi</option>
+        <option value="ta">Tamil</option>
+        <option value="te">Telugu</option>
+        <option value="mr">Marathi</option>
+        <option value="bn">Bengali</option>
+      </select>
+    </div>
+    <button id="start-btn" onclick="startConversation()">▶ Start Conversation</button>
+  </div>
+
+  <!-- Chat -->
+  <div class="chat-area" id="chat-area">
+    <div class="empty-state" id="empty-state">
+      <div class="icon">🎙️</div>
+      <div>Select a customer and press Start</div>
+    </div>
+  </div>
+
+  <div class="tts-indicator" id="tts-indicator">🔊 Speaking…</div>
+
+  <!-- Input bar -->
+  <div class="input-bar">
+    <button id="mic-btn" onclick="toggleMic()" disabled title="Hold to speak">🎙️</button>
+    <input id="text-input" type="text" placeholder="Type a message…" disabled
+           onkeydown="if(event.key==='Enter') sendText()"/>
+    <button id="send-btn" onclick="sendText()" disabled>➤</button>
+  </div>
+
+</div>
+
+<script>
+  const API  = "http://localhost:8000/api";
+  let sessionId       = null;
+  let langCode        = "en";
+  let isRecording     = false;
+  let mediaRecorder   = null;
+  let audioChunks     = [];
+  let currentAudio    = null;
+  let isResolved      = false;
+  let ticketAnimShown = false;   // prevent duplicate ticket animations
+
+  // ── Start conversation ────────────────────────────────────────────────────
+  async function startConversation() {
+    const customerId = document.getElementById("customer-id").value;
+    langCode         = document.getElementById("language-code").value;
+
+    // Reset
+    isResolved      = false;
+    sessionId       = null;
+    ticketAnimShown = false;
+    document.getElementById("chat-area").innerHTML = "";
+    document.getElementById("empty-state") && (document.getElementById("empty-state").remove());
+    setStatus("Connecting…", false);
+    document.getElementById("start-btn").disabled = true;
+    document.getElementById("customer-id").disabled = true;
+    document.getElementById("language-code").disabled = true;
+
+    try {
+      const res  = await fetch(`${API}/conversation/start?customer_id=${customerId}&language_code=${langCode}`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to start");
+
+      sessionId = data.session_id;
+      setStatus("Active", true);
+      enableInput(true);
+      addBubble("agent", data.greeting);
+      await playTTS(data.greeting);
+    } catch(e) {
+      setStatus("Error", false);
+      addSystemMsg("Could not start: " + e.message);
+      document.getElementById("start-btn").disabled = false;
+      document.getElementById("customer-id").disabled = false;
+      document.getElementById("language-code").disabled = false;
+    }
+  }
+
+  // ── Send text ─────────────────────────────────────────────────────────────
+  async function sendText() {
+    const input = document.getElementById("text-input");
+    const text  = input.value.trim();
+    if (!text || !sessionId || isResolved) return;
+    input.value = "";
+
+    const bubbleId = addBubble("user", text);
+    await processTurn(`${API}/conversation/${sessionId}/text?text=${encodeURIComponent(text)}`, "POST", null, bubbleId);
+  }
+
+  // ── Mic ───────────────────────────────────────────────────────────────────
+  async function toggleMic() {
+    if (isRecording) stopRecording();
+    else await startRecording();
+  }
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunks  = [];
+      const mime   = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus"
+                   : MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "";
+      mediaRecorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || "audio/webm" });
+        await sendVoice(blob);
+      };
+      mediaRecorder.start(100);
+      isRecording = true;
+      document.getElementById("mic-btn").classList.add("recording");
+      document.getElementById("mic-btn").textContent = "⏹️";
+      setStatus("Recording…", true);
+    } catch { addSystemMsg("Microphone access denied."); }
+  }
+
+  function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
+    isRecording = false;
+    document.getElementById("mic-btn").classList.remove("recording");
+    document.getElementById("mic-btn").textContent = "🎙️";
+    setStatus("Processing…", true);
+  }
+
+  async function sendVoice(blob) {
+    const form = new FormData();
+    form.append("language_code", langCode);
+    form.append("audio", blob, "recording.webm");
+    enableInput(false);
+    await processTurn(`${API}/conversation/${sessionId}/voice`, "POST", form, null);
+  }
+
+  // ── Core turn handler ─────────────────────────────────────────────────────
+  async function processTurn(url, method, body, userBubbleId) {
+    showTyping();
+    enableInput(false);
+
+    try {
+      const res  = await fetch(url, { method, body });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Server error");
+
+      hideTyping();
+
+      // Show transcript if voice (with frustration badge)
+      if (data.transcript) addBubble("user", data.transcript, true, data.frustration);
+
+      // Attach frustration badge to the text bubble we already added
+      if (!data.transcript && data.frustration && userBubbleId) {
+        attachFrustrationBadge(userBubbleId, data.frustration);
+      }
+
+      // Ticket animation: show once when ticket action first occurs
+      if (data.ticket_id && (data.branch === "raise_ticket" || data.branch === "ticket_exists") && !ticketAnimShown) {
+        ticketAnimShown = true;
+        await showTicketAnimation(data.branch, data.ticket_id);
+      }
+
+      addBubble("agent", data.text);
+      await playTTS(data.text);
+
+      if (data.is_resolved) {
+        isResolved = true;
+        showResolutionCard(data);
+        enableInput(false);
+        setStatus("Resolved", false);
+        setTimeout(() => {
+          document.getElementById("start-btn").disabled = false;
+          document.getElementById("start-btn").textContent = "▶ New Conversation";
+          document.getElementById("customer-id").disabled = false;
+          document.getElementById("language-code").disabled = false;
+        }, 1500);
+      } else {
+        setStatus("Active", true);
+        enableInput(true);
+      }
+    } catch(e) {
+      hideTyping();
+      addSystemMsg("Error: " + e.message);
+      enableInput(true);
+      setStatus("Active", true);
+    }
+  }
+
+  // ── Ticket status animation ───────────────────────────────────────────────
+  async function showTicketAnimation(branch, ticketId) {
+    const area = document.getElementById("chat-area");
+
+    // Step 1 — searching
+    const el = document.createElement("div");
+    el.className = "ticket-status checking";
+    el.innerHTML = `<span class="ts-spin">⏳</span> Checking for existing tickets…`;
+    area.appendChild(el);
+    area.scrollTop = area.scrollHeight;
+
+    await delay(750);
+
+    if (branch === "ticket_exists") {
+      el.className = "ticket-status info";
+      el.innerHTML = `📋 Found existing ticket: <strong>${esc(ticketId)}</strong>`;
+    } else {
+      // raise_ticket path
+      el.innerHTML = `<span class="ts-spin">⚡</span> No open ticket found — raising new ticket…`;
+      await delay(650);
+      el.className = "ticket-status success";
+      el.innerHTML = `✅ Ticket raised: <strong>${esc(ticketId)}</strong>`;
+    }
+    area.scrollTop = area.scrollHeight;
+    await delay(300);
+  }
+
+  function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  // ── UI helpers ────────────────────────────────────────────────────────────
+  let _bubbleSeq = 0;
+
+  function addBubble(role, text, isTranscript = false, frustration = null) {
+    const area = document.getElementById("chat-area");
+    const row  = document.createElement("div");
+    const id   = `bubble-${++_bubbleSeq}`;
+    row.id        = id;
+    row.className = `bubble-row ${role}`;
+
+    const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+    if (role === "agent") {
+      row.innerHTML = `
+        <div class="avatar">AI</div>
+        <div class="bubble agent">
+          ${esc(text)}
+          <span class="ts">${now}</span>
+        </div>`;
+    } else {
+      const label = isTranscript ? `<div style="font-size:0.68rem;opacity:0.7;margin-bottom:3px">🎙 Voice</div>` : "";
+      const badge = frustration ? frustrationBadgeHtml(frustration) : "";
+      row.innerHTML = `
+        <div class="bubble user">
+          ${badge}${label}${esc(text)}
+          <span class="ts">${now}</span>
+        </div>`;
+    }
+
+    area.appendChild(row);
+    area.scrollTop = area.scrollHeight;
+    return id;
+  }
+
+  function frustrationBadgeHtml(level) {
+    const labels = { low: "😊 Low", medium: "😐 Medium", high: "😠 High", critical: "🔴 Critical" };
+    const cls    = { low: "fb-low", medium: "fb-medium", high: "fb-high", critical: "fb-critical" };
+    if (!labels[level]) return "";
+    return `<div class="frustration-badge ${cls[level]}">${labels[level]}</div>`;
+  }
+
+  function attachFrustrationBadge(bubbleId, frustration) {
+    const row = document.getElementById(bubbleId);
+    if (!row) return;
+    const bubble = row.querySelector(".bubble.user");
+    if (!bubble) return;
+    const existing = bubble.querySelector(".frustration-badge");
+    if (existing) existing.remove();
+    bubble.insertAdjacentHTML("afterbegin", frustrationBadgeHtml(frustration));
+  }
+
+  function addSystemMsg(text) {
+    const area = document.getElementById("chat-area");
+    const el   = document.createElement("div");
+    el.style.cssText = "text-align:center;font-size:0.72rem;color:#aaa;padding:4px 0";
+    el.textContent   = text;
+    area.appendChild(el);
+    area.scrollTop = area.scrollHeight;
+  }
+
+  let typingEl = null;
+  function showTyping() {
+    const area = document.getElementById("chat-area");
+    typingEl   = document.createElement("div");
+    typingEl.className = "bubble-row agent";
+    typingEl.innerHTML = `<div class="avatar">AI</div><div class="typing"><span></span><span></span><span></span></div>`;
+    area.appendChild(typingEl);
+    area.scrollTop = area.scrollHeight;
+  }
+  function hideTyping() { typingEl && typingEl.remove(); typingEl = null; }
+
+  function showResolutionCard(data) {
+    const area   = document.getElementById("chat-area");
+    const card   = document.createElement("div");
+    const branch = data.branch;
+    const decision = data.decision || {};
+    const brief    = data.handoff_brief;
+
+    let cls, title;
+    if (branch === "raise_ticket" || branch === "close") {
+      cls   = "raise";
+      title = branch === "close" ? "✅ Issue Resolved" : "✅ Ticket Raised";
+    } else if (branch === "ticket_exists") {
+      cls   = "exists";
+      title = "📋 Existing Ticket";
+    } else {
+      cls   = "escalate";
+      title = "🚨 Escalated to Human Agent";
+    }
+
+    let inner = `<div class="rc-title">${title}</div>`;
+    if (data.ticket_id)               inner += row("Ticket ID", data.ticket_id);
+    if (data.priority_tier)           inner += row("Priority", `${data.priority_tier} (${data.priority_score}/10)`);
+    if (decision.intent)              inner += row("Issue", decision.intent);
+    if (decision.frustration_level)   inner += row("Frustration", decision.frustration_level);
+
+    if (brief) {
+      if (brief.churn_risk) inner += `<div class="churn-badge">⚠️ CHURN RISK — Retention offer pre-authorised</div>`;
+      if (brief.frustration_signals && brief.frustration_signals.length)
+        inner += row("Frustration signals", brief.frustration_signals.join(", "));
+      if (brief.prior_unresolved) inner += row("Prior unresolved", brief.prior_unresolved);
+      if (brief.raised_ticket_id) inner += row("Earlier ticket", brief.raised_ticket_id);
+      inner += `<div class="first-move"><strong>First move:</strong> ${esc(brief.first_move)}</div>`;
+      if (brief.conversation_summary) {
+        inner += `<details style="margin-top:8px"><summary style="font-size:0.75rem;cursor:pointer;color:#888">Full conversation log</summary>
+        <pre style="font-size:0.72rem;color:#555;white-space:pre-wrap;margin-top:6px">${esc(brief.conversation_summary)}</pre></details>`;
+      }
+    }
+
+    card.className = `resolution-card ${cls}`;
+    card.innerHTML = inner;
+    area.appendChild(card);
+    area.scrollTop = area.scrollHeight;
+  }
+
+  function row(k, v) {
+    return `<div class="rc-row"><span class="rc-key">${k}</span><span class="rc-val">${esc(String(v))}</span></div>`;
+  }
+
+  function enableInput(on) {
+    document.getElementById("text-input").disabled = !on;
+    document.getElementById("send-btn").disabled   = !on;
+    document.getElementById("mic-btn").disabled    = !on;
+  }
+
+  function setStatus(text, active) {
+    document.getElementById("status-text").textContent = text;
+    const dot = document.getElementById("status-dot");
+    dot.className = "status-dot" + (active ? "" : " idle");
+  }
+
+  // ── TTS ───────────────────────────────────────────────────────────────────
+  async function playTTS(text) {
+    if (!text) return;
+    const indicator = document.getElementById("tts-indicator");
+    indicator.classList.add("active");
+    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+
+    try {
+      const res = await fetch(
+        `${API}/tts/stream?text=${encodeURIComponent(text)}&language_code=${encodeURIComponent(langCode)}`,
+        { method: "POST" }
+      );
+      if (!res.ok) { indicator.classList.remove("active"); return; }
+      const blob = await res.blob();
+      if (blob.size === 0) { indicator.classList.remove("active"); return; }
+      const url  = URL.createObjectURL(blob);
+      currentAudio = new Audio(url);
+      currentAudio.onended = () => { indicator.classList.remove("active"); URL.revokeObjectURL(url); };
+      currentAudio.onerror = () => { indicator.classList.remove("active"); };
+      await currentAudio.play();
+    } catch { indicator.classList.remove("active"); }
+  }
+
+  function esc(s) {
+    return String(s ?? "")
+      .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+      .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+</script>
+</body>
+</html>
