@@ -12,3 +12,6 @@ sarvamai
 # SER — Speech Emotion Recognition
 transformers>=4.40
 av>=12.0
+# Vector memory — ChromaDB + sentence embeddings
+chromadb>=0.5
+sentence-transformers>=3.0

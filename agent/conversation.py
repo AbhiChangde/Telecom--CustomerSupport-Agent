@@ -5,7 +5,7 @@ import asyncio
 import google.generativeai as genai
 
 from services.crm import get_customer_profile, get_tickets, raise_ticket as crm_raise_ticket
-from services.vector_db import store_conversation
+from services.vector_db import recall_customer_history, recall_similar_complaints, store_conversation
 from services.sms import send_sms
 from agent.conditions import compute_priority_tier
 
@@ -14,8 +14,22 @@ _HIGH_FRUSTRATION = {
     "useless", "worst", "terrible", "pathetic", "horrible", "awful",
     "fed up", "ridiculous", "fraud", "scam", "incompetent", "disgusting",
     "not working", "still not", "again", "always", "never works",
+    # Hindi high-frustration
     "बेकार", "घटिया", "बेशर्म", "बकवास",
 }
+
+# English expletives / personal insults directed at the agent
+_EXPLETIVE_FRUSTRATION = {
+    "stupid", "idiot", "moron", "dumb", "fool", "nonsense", "rubbish",
+    "shut up", "you suck", "hate you", "hate this", "hate airtel",
+    "bloody", "damn", "hell", "crap", "bullshit", "bs",
+    "wtf", "what the hell", "what the heck", "are you kidding",
+    "are you serious", "seriously", "unbelievable", "ridiculous",
+    # Hindi / Hinglish insults
+    "बेवकूफ", "गधा", "मूर्ख", "चुप", "फालतू", "बकवास बंद",
+    "निकम्मा", "कमीना", "harassment",
+}
+
 _CRITICAL_FRUSTRATION = {
     "legal action", "consumer forum", "trai", "police complaint",
     "done with airtel", "never using airtel", "switching",
@@ -34,6 +48,12 @@ Customer profile (already loaded — NEVER ask for these details again):
 - Tenure: {tenure_years} years with Airtel
 - Prior unresolved tickets: {prior_unresolved}
 - Open tickets right now: {open_tickets}
+
+Prior complaint memory (from previous sessions — NOT the same as open tickets):
+{memory_section}
+If the customer's current issue matches anything in the memory above, acknowledge it naturally:
+"I can see this is something you've experienced before — I'm really sorry we haven't been able to permanently fix this."
+The more times a customer has raised the same issue, the more urgently it must be treated.
 
 CUSTOMER TIER HANDLING — strictly follow these escalation rules based on {arpu_tier}:
 
@@ -119,17 +139,28 @@ class ConversationAgent:
         self.ticket_raised         = False
         self.raised_ticket_id      = None
         self.consecutive_frustrated = 0   # turns with detected high/critical frustration
+        self.prior_memory          = []   # past issues from ChromaDB
+        self.similar_issue_count   = 0    # similar past issues found at resolve time
 
     async def initialize(self) -> str:
         """Load customer context, start Gemini chat, return greeting text."""
-        self.customer_profile, self.tickets = await asyncio.gather(
+        self.customer_profile, self.tickets, self.prior_memory = await asyncio.gather(
             get_customer_profile(self.customer_id),
             get_tickets(self.customer_id),
+            recall_customer_history(self.customer_id),
         )
         self.prior_unresolved = sum(
             1 for t in self.tickets if t["status"] in ("closed_unresolved", "auto_closed")
         )
         open_tickets = [t for t in self.tickets if t["status"] == "open"]
+
+        if self.prior_memory:
+            lines = "\n".join(
+                f"  - [{m['date']}] {m['intent']}" for m in self.prior_memory
+            )
+            memory_section = f"{len(self.prior_memory)} past issue(s) on record:\n{lines}"
+        else:
+            memory_section = "No prior complaints on record for this customer."
 
         system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
             language_name=self.language_name,
@@ -140,6 +171,7 @@ class ConversationAgent:
             tenure_years=self.customer_profile["tenure_years"],
             prior_unresolved=self.prior_unresolved,
             open_tickets=len(open_tickets),
+            memory_section=memory_section,
         )
 
         genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
@@ -224,6 +256,8 @@ class ConversationAgent:
             return "critical"
         if any(w in t for w in _HIGH_FRUSTRATION):
             return "high"
+        if any(w in t for w in _EXPLETIVE_FRUSTRATION):
+            return "high"
         if t.count("?") >= 2 or "please" in t:
             return "medium"
         return "low"
@@ -253,12 +287,22 @@ class ConversationAgent:
         churn_risk     = decision.get("churn_risk", False)
         priority_score = decision.get("priority_score", 5)
 
+        # ── Semantic memory recall ────────────────────────────────────────
+        # Find how many past sessions involved the same/similar issue
+        similar_past = await recall_similar_complaints(
+            self.customer_id, decision.get("intent", "")
+        )
+        self.similar_issue_count = len(similar_past)
+
         # ── Tier-aware escalation override ───────────────────────────────
         arpu_tier  = profile.get("arpu_tier", "prepaid_monthly")
         is_premium = arpu_tier in ("black", "postpaid_high")
 
         if churn_risk:
             # Churn risk always escalates regardless of tier
+            action = "escalate_human"
+        elif is_premium and self.similar_issue_count >= 2:
+            # Premium customer has reported the same issue 2+ times before → direct human
             action = "escalate_human"
         elif is_premium:
             # Premium: human support at medium frustration or above
@@ -319,6 +363,8 @@ class ConversationAgent:
                 "frustration_signals":  decision.get("frustration_signals", []),
                 "churn_risk":           churn_risk,
                 "prior_unresolved":     self.prior_unresolved,
+                "similar_past_issues":  similar_past,
+                "recurring_issue":      self.similar_issue_count >= 2,
                 "ticket_history":       self.tickets,
                 "raised_ticket_id":     self.raised_ticket_id,
                 "first_move":           self._first_move(decision),
@@ -340,6 +386,9 @@ class ConversationAgent:
                     "I'm escalating this to our specialist team who will call you back shortly. "
                     "They already have your full details and complaint history."
                 )
+            await store_conversation(
+                self.customer_id, decision.get("intent", ""), self.session_id
+            )
             self.messages.append({"role": "agent", "text": response_text})
             self.is_resolved = True
             self.resolution  = {"branch": "escalate", "decision": decision, "response_text": response_text}
@@ -388,9 +437,7 @@ class ConversationAgent:
                 "Our team will contact you within 24 hours.",
             )
             await store_conversation(
-                self.customer_id,
-                " | ".join(m["text"] for m in self.messages if m["role"] == "user"),
-                decision.get("intent", ""),
+                self.customer_id, decision.get("intent", ""), self.session_id
             )
             self.ticket_raised    = True
             self.raised_ticket_id = ticket_id

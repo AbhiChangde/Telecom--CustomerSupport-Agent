@@ -31,7 +31,23 @@ async def get_tickets(customer_id: str) -> list[Ticket]:
 
 async def raise_ticket(customer_id: str, issue: str, priority: int) -> str:
     if os.getenv("USE_MOCK_CRM", "true").lower() == "true":
+        from datetime import date
         ticket_id = f"TKT-{customer_id[-4:]}-{uuid.uuid4().hex[:6].upper()}"
+
+        tickets = _load_tickets()
+        if customer_id not in tickets:
+            tickets[customer_id] = []
+        tickets[customer_id].append({
+            "ticket_id":     ticket_id,
+            "issue_summary": issue,
+            "status":        "open",
+            "created_date":  date.today().isoformat(),
+            "closed_date":   None,
+            "issue_category": "general",
+        })
+        with open(MOCK_DIR / "tickets.json", "w") as f:
+            json.dump(tickets, f, indent=2)
+
         print(f"[MOCK CRM] Raised ticket {ticket_id} for {customer_id}: {issue} (priority {priority})")
         return ticket_id
 
